@@ -575,9 +575,10 @@ cir::GlobalOp CIRGenFunction::addInitializerToStaticVarDecl(
   // initializer.
   if (!init) {
     if (!getLangOpts().CPlusPlus) {
-      cgm.errorNYI(d.getInit(), "constant l-value expression");
+      cgm.errorNYI(d.getInit()->getSourceRange(),
+                   "constant l-value expression");
     } else if (d.hasFlexibleArrayInit(getContext())) {
-      cgm.errorNYI(d.getInit(), "flexible array initializer");
+      cgm.errorNYI(d.getInit()->getSourceRange(), "flexible array initializer");
     } else {
       // Since we have a static initializer, this global variable can't
       // be constant.
