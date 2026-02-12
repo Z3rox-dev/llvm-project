@@ -875,18 +875,28 @@ struct Allocator {
   // Returns true if the allocation at p was a zero-size request that was
   // internally upgraded to size 1.
   bool FromZeroAllocation(uptr p) {
-    return reinterpret_cast<AsanChunk *>(p - kChunkHeaderSize)->from_zero_alloc;
+    return reinterpret_cast<AsanChunk*>(p - kChunkHeaderSize)->from_zero_alloc;
+  }
+
+  // Marks an existing size 1 allocation as having originally been zero-size.
+  // Used by SharedReAlloc which augments size 0 to 1 before calling
+  // asan_realloc, bypassing Allocate's own zero-size tracking.
+  void MarkAsZeroAllocation(uptr p) {
+    AsanChunk* m = reinterpret_cast<AsanChunk*>(p - kChunkHeaderSize);
+    m->from_zero_alloc = 1;
+    PoisonShadow(p, ASAN_SHADOW_GRANULARITY, kAsanHeapLeftRedzoneMagic);
   }
 #endif
 
   uptr AllocationSizeFast(uptr p) {
+    AsanChunk* c = reinterpret_cast<AsanChunk*>(p - kChunkHeaderSize);
+
 #if SANITIZER_WINDOWS
-    AsanChunk *c = reinterpret_cast<AsanChunk *>(p - kChunkHeaderSize);
-    if (c->from_zero_alloc) return 0;
-    return c->UsedSize();
-#else
-    return reinterpret_cast<AsanChunk *>(p - kChunkHeaderSize)->UsedSize();
+    if (c->from_zero_alloc)
+      return 0;
 #endif
+
+    return c->UsedSize();
   }
 
   AsanChunkView FindHeapChunkByAddress(uptr addr) {
@@ -1251,16 +1261,22 @@ void asan_delete_array_sized_aligned(void *ptr, uptr size, uptr alignment,
   asan_delete_sized_aligned(ptr, size, alignment, stack, /*array=*/true);
 }
 
-uptr asan_mz_size(const void *ptr) {
-#if SANITIZER_WINDOWS
+uptr asan_mz_size(const void* ptr) {
   uptr size = instance.AllocationSize(reinterpret_cast<uptr>(ptr));
+
+#if SANITIZER_WINDOWS
   if (size > 0 && instance.FromZeroAllocation(reinterpret_cast<uptr>(ptr)))
     return 0;
-  return size;
-#else
-  return instance.AllocationSize(reinterpret_cast<uptr>(ptr));
 #endif
+
+  return size;
 }
+
+#if SANITIZER_WINDOWS
+void asan_mark_zero_allocation(void* ptr) {
+  instance.MarkAsZeroAllocation(reinterpret_cast<uptr>(ptr));
+}
+#endif
 
 void asan_mz_force_lock() SANITIZER_NO_THREAD_SAFETY_ANALYSIS {
   instance.ForceLock();
